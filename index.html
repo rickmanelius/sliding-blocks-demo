@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sliding Blocks — More Space, Fewer Moves</title>
+<style>
+  :root{
+    --bg:#fafafa; --ink:#1a1a1a; --muted:#6b7280; --line:#e5e7eb;
+    --board:#c9ccd1; --tile:#ffffff; --tile-ink:#1f2937; --accent:#2563eb;
+    --good:#16a34a;
+    --cell:64px; --gap:4px;
+    --dur:240ms;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--bg);
+    line-height:1.45; -webkit-font-smoothing:antialiased;
+    padding:32px 20px 24px;
+  }
+  .wrap{max-width:980px; margin:0 auto}
+  header{text-align:center; margin-bottom:6px}
+  h1{font-size:1.6rem; font-weight:650; letter-spacing:-.01em; margin:0 0 6px}
+  .lede{color:var(--muted); font-size:.98rem; max-width:640px; margin:0 auto}
+
+  .controls{
+    display:flex; align-items:center; justify-content:center; gap:22px;
+    flex-wrap:wrap; margin:22px 0 26px;
+  }
+  .speed{display:flex; align-items:center; gap:10px; font-size:.9rem; color:var(--muted)}
+  .speed input[type=range]{width:180px; accent-color:var(--accent)}
+  .algo{display:flex; align-items:center; gap:8px; font-size:.9rem; color:var(--muted)}
+  .algo select{font:inherit; font-size:.9rem; color:var(--ink); padding:6px 8px;
+    border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer}
+  button.run{
+    font:inherit; font-size:.92rem; font-weight:550; color:#fff; background:var(--ink);
+    border:0; border-radius:8px; padding:9px 16px; cursor:pointer;
+  }
+  button.run:hover{background:#000}
+  button.run:active{transform:translateY(1px)}
+
+  .grid{display:flex; gap:22px; justify-content:center; flex-wrap:wrap}
+  .card{
+    background:#fff; border:1px solid var(--line); border-radius:14px;
+    padding:16px 16px 14px; width:calc(var(--cell)*4 + 32px);
+    box-shadow:0 1px 2px rgba(0,0,0,.04);
+    transition:border-color .3s ease;
+  }
+  .card.solved{border-color:var(--good)}
+  .card h2{font-size:1.05rem; font-weight:600; margin:0 0 1px; text-align:center}
+  .card .method{font-size:.76rem; color:var(--muted); text-align:center; margin-bottom:12px}
+
+  .board{
+    position:relative;
+    width:calc(var(--cell)*4); height:calc(var(--cell)*4);
+    background:var(--board); border-radius:8px; margin:0 auto;
+  }
+  .tile{
+    position:absolute; top:0; left:0;
+    width:calc(var(--cell) - var(--gap)*2); height:calc(var(--cell) - var(--gap)*2);
+    margin:var(--gap);
+    display:flex; align-items:center; justify-content:center;
+    background:var(--tile); color:var(--tile-ink);
+    font-size:1.25rem; font-weight:600; font-variant-numeric:tabular-nums;
+    border-radius:7px; box-shadow:0 1px 1.5px rgba(0,0,0,.12);
+    transition:transform var(--dur) ease-in-out;
+    will-change:transform;
+  }
+
+  .stats{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-top:14px; padding-top:12px; border-top:1px solid var(--line);
+  }
+  .stat{display:flex; flex-direction:column; align-items:center; flex:1}
+  .stat .v{font-size:1.4rem; font-weight:650; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+  .stat .k{font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
+  .stat .v.done{color:var(--good)}
+
+  footer{text-align:center; margin-top:34px; font-size:.85rem; color:var(--muted)}
+  footer a{color:var(--accent); text-decoration:none}
+  footer a:hover{text-decoration:underline}
+
+  @media (max-width:560px){
+    :root{--cell:58px}
+    .controls{gap:16px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Sliding Blocks: more space, fewer moves</h1>
+    <p class="lede">
+      Three 4×4 puzzles, each shuffled with the <strong>same 40 random moves</strong>,
+      then solved automatically. With the <strong>optimal</strong> solver, each extra empty
+      space means fewer moves. Switch to the <strong>human</strong> method and the counts go
+      flat — proof that the savings come from <em>smart solving</em>, not the spaces alone.
+    </p>
+  </header>
+
+  <div class="controls">
+    <label class="algo">
+      Algorithm
+      <select id="algo">
+        <option value="optimal">Optimal — fewest moves</option>
+        <option value="human">Human — layer-by-layer</option>
+      </select>
+    </label>
+    <label class="speed">
+      Slow
+      <input id="speed" type="range" min="0" max="100" value="55" aria-label="Solve speed">
+      Fast
+    </label>
+    <button class="run" id="shuffle">Shuffle &amp; Solve</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    Inspired by Sam Loyd's classic puzzle ·
+    <a href="http://www.murderousmaths.co.uk/games/loyd/loydfr.htm" target="_blank" rel="noopener">
+      murderousmaths.co.uk — the 14–15 puzzle
+    </a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+(function(){
+  const N = 4, SIZE = N*N;
+  const SCRAMBLE = 40;                 // shared shuffle depth for a fair comparison
+  let algorithm = 'optimal';           // 'optimal' | 'human'
+  const DIRS = [[-1,0],[1,0],[0,-1],[0,1]];
+  const rc = i => [(i/N)|0, i%N];
+  const idx = (r,c) => r*N+c;
+  // neighbour cells for each index
+  const NB = [];
+  for(let i=0;i<SIZE;i++){ const [r,c]=rc(i); const a=[];
+    for(const [dr,dc] of DIRS){ const nr=r+dr, nc=c+dc;
+      if(nr>=0&&nr<N&&nc>=0&&nc<N) a.push(idx(nr,nc)); } NB[i]=a; }
+  // home row/col for each tile value
+  const homeR=[], homeC=[];
+  for(let v=1;v<SIZE;v++){ homeR[v]=((v-1)/N)|0; homeC[v]=(v-1)%N; }
+
+  // --- heuristic: Manhattan distance + linear conflict (admissible) ---
+  function heur(b){
+    let h=0;
+    for(let i=0;i<SIZE;i++){ const v=b[i]; if(!v) continue;
+      const [r,c]=rc(i); h += Math.abs(r-homeR[v]) + Math.abs(c-homeC[v]); }
+    for(let r=0;r<N;r++) for(let c1=0;c1<N;c1++){ const a=b[idx(r,c1)];
+      if(!a||homeR[a]!==r) continue;
+      for(let c2=c1+1;c2<N;c2++){ const x=b[idx(r,c2)];
+        if(!x||homeR[x]!==r) continue; if(homeC[a]>homeC[x]) h+=2; } }
+    for(let c=0;c<N;c++) for(let r1=0;r1<N;r1++){ const a=b[idx(r1,c)];
+      if(!a||homeC[a]!==c) continue;
+      for(let r2=r1+1;r2<N;r2++){ const x=b[idx(r2,c)];
+        if(!x||homeC[x]!==c) continue; if(homeR[a]>homeR[x]) h+=2; } }
+    return h;
+  }
+  const key = b => b.join(",");
+
+  // --- min-heap on f ---
+  class Heap{
+    constructor(){ this.a=[]; }
+    get size(){ return this.a.length; }
+    push(x){ const a=this.a; a.push(x); let i=a.length-1;
+      while(i>0){ const p=(i-1)>>1; if(a[p].f<=a[i].f) break; [a[p],a[i]]=[a[i],a[p]]; i=p; } }
+    pop(){ const a=this.a, t=a[0], l=a.pop();
+      if(a.length){ a[0]=l; let i=0; for(;;){ let L=2*i+1,R=2*i+2,s=i;
+        if(L<a.length&&a[L].f<a[s].f)s=L; if(R<a.length&&a[R].f<a[s].f)s=R;
+        if(s===i)break; [a[s],a[i]]=[a[i],a[s]]; i=s; } } return t; }
+  }
+
+  // --- A* optimal solver; returns array of moves {tile, from, to} or null ---
+  function solve(start){
+    const cap = 600000;
+    const k0 = key(start);
+    const g = new Map([[k0,0]]);
+    const came = new Map();          // key -> {pk, move}
+    const open = new Heap();
+    open.push({ b:start.slice(), g:0, f:heur(start), k:k0 });
+    let exp = 0;
+    while(open.size){
+      const cur = open.pop();
+      if(g.get(cur.k) !== cur.g) continue;   // stale
+      if(heur(cur.b)===0){
+        const moves=[]; let k=cur.k;
+        while(k!==k0){ const e=came.get(k); moves.push(e.move); k=e.pk; }
+        moves.reverse(); return moves;
+      }
+      if(++exp>cap) return null;
+      const b = cur.b;
+      for(let i=0;i<SIZE;i++){
+        if(b[i]!==0) continue;
+        for(const ni of NB[i]){
+          const tile=b[ni]; if(tile===0) continue;
+          const nb=b.slice(); nb[i]=tile; nb[ni]=0;
+          const nk=key(nb), ng=cur.g+1, old=g.get(nk);
+          if(old!==undefined && old<=ng) continue;
+          g.set(nk,ng);
+          came.set(nk,{pk:cur.k, move:{tile, from:ni, to:i}});
+          open.push({ b:nb, g:ng, f:ng+heur(nb), k:nk });
+        }
+      }
+    }
+    return null;
+  }
+
+  // --- scramble: from solved, apply m random non-reversing moves ---
+  function scramble(blanks, m){
+    const b=[]; for(let i=1;i<=SIZE-blanks;i++) b.push(i);
+    for(let i=0;i<blanks;i++) b.push(0);
+    let holes=[]; for(let i=0;i<SIZE;i++) if(b[i]===0) holes.push(i);
+    let lastTile=-1, lastFrom=-1;
+    for(let k=0;k<m;k++){
+      const mv=[];
+      for(const h of holes) for(const ni of NB[h]){
+        if(b[ni]===0) continue;
+        if(b[ni]===lastTile && h===lastFrom) continue;   // avoid undo
+        mv.push([h,ni]);
+      }
+      const [h,ni]=mv[(Math.random()*mv.length)|0];
+      lastTile=b[ni]; lastFrom=ni;
+      b[h]=b[ni]; b[ni]=0;
+      const hi=holes.indexOf(h); holes[hi]=ni;
+    }
+    return b;
+  }
+
+  // ===== Human (layer-by-layer) solver — works a single-blank 15-puzzle =====
+  // Extra blank spaces are rendered as invisible "phantom" tiles, so this one
+  // solver drives every board. It does NOT exploit the extra holes (that's the
+  // point: a person solving methodically uses one working space), so its move
+  // count stays roughly flat no matter how many spaces a board has.
+  function hState(board){ return { board:board.slice(), blank:board.indexOf(0), moves:[] }; }
+  function hStep(s, cell){            // blank slides into `cell`, pushing that tile out
+    const b=s.blank, tile=s.board[cell];
+    s.board[b]=tile; s.board[cell]=0; s.moves.push({tile, from:cell, to:b}); s.blank=cell;
+  }
+  // move ONE tile to target — BFS over (tilePos, blankPos)
+  function hTile(s, tile, target, locked){
+    const t0=s.board.indexOf(tile); if(t0===target) return;
+    const enc=(t,b)=>t*SIZE+b;
+    const prev=new Map([[enc(t0,s.blank),null]]); const q=[[t0,s.blank]]; let h=0, goal=-1;
+    while(h<q.length){ const [tp,bp]=q[h++]; if(tp===target){ goal=enc(tp,bp); break; }
+      for(const nb of NB[bp]){ if(locked.has(nb)) continue; const ntp=(nb===tp)?bp:tp;
+        const k=enc(ntp,nb); if(prev.has(k)) continue; prev.set(k,{pk:enc(tp,bp),into:nb}); q.push([ntp,nb]); } }
+    if(goal===-1) throw new Error('hTile no path');
+    const seq=[]; let k=goal; while(prev.get(k)!==null){ const e=prev.get(k); seq.push(e.into); k=e.pk; }
+    seq.reverse(); for(const c of seq) hStep(s,c);
+  }
+  function hSingle(s, tile, target, locked){ hTile(s,tile,target,locked); locked.add(target); }
+  // place TWO tiles together — BFS over (posA, posB, blankPos). Tracking both at
+  // once avoids the row-finishing deadlock (a single blank trapped in a pendant).
+  function hPair(s, tA, cA, tB, cB, locked){
+    if(s.board[cA]===tA && s.board[cB]===tB){ locked.add(cA); locked.add(cB); return; }
+    const enc=(a,b,k)=>(a*SIZE+b)*SIZE+k;
+    const pa0=s.board.indexOf(tA), pb0=s.board.indexOf(tB);
+    const prev=new Map([[enc(pa0,pb0,s.blank),null]]); const q=[[pa0,pb0,s.blank]]; let h=0, goal=-1;
+    while(h<q.length){ const [pa,pb,bl]=q[h++]; if(pa===cA&&pb===cB){ goal=enc(pa,pb,bl); break; }
+      for(const nb of NB[bl]){ if(locked.has(nb)) continue; let na=pa,nbb=pb;
+        if(nb===pa)na=bl; else if(nb===pb)nbb=bl; const k=enc(na,nbb,nb);
+        if(prev.has(k)) continue; prev.set(k,{pk:enc(pa,pb,bl),into:nb}); q.push([na,nbb,nb]); } }
+    if(goal===-1) throw new Error('hPair no path');
+    const seq=[]; let k=goal; while(prev.get(k)!==null){ const e=prev.get(k); seq.push(e.into); k=e.pk; }
+    seq.reverse(); for(const c of seq) hStep(s,c); locked.add(cA); locked.add(cB);
+  }
+  function hFinish(s){               // rotate the last 2×2 until solved
+    const ring=[idx(2,2),idx(2,3),idx(3,3),idx(3,2)];
+    const done=()=>s.board[10]===11&&s.board[11]===12&&s.board[14]===15&&s.board[15]===0;
+    let g=0; while(!done()){ if(++g>30) throw new Error('2x2 stuck');
+      const pos=ring.indexOf(s.blank); hStep(s, ring[(pos+1)%4]); }
+  }
+  function solveHuman(board){
+    const s=hState(board), L=new Set();
+    hSingle(s,1,0,L); hSingle(s,2,1,L); hPair(s,3,idx(0,2),4,idx(0,3),L);
+    hSingle(s,5,4,L); hSingle(s,6,5,L); hPair(s,7,idx(1,2),8,idx(1,3),L);
+    hPair(s,9,idx(2,0),13,idx(3,0),L); hPair(s,10,idx(2,1),14,idx(3,1),L);
+    hFinish(s); return s.moves;
+  }
+
+  function makePuzzle(blanks){
+    if(algorithm==='human'){
+      // single-blank 15-puzzle; tiles above (16-blanks) are phantom (rendered blank)
+      for(let attempt=0; attempt<30; attempt++){
+        const s = scramble(1, SCRAMBLE);
+        if(heur(s)===0) continue;
+        try { return { start:s, moves: solveHuman(s) }; } catch(e){ /* retry */ }
+      }
+      const s = scramble(1, 30);
+      return { start:s, moves: solveHuman(s) };
+    }
+    for(let attempt=0; attempt<20; attempt++){
+      const s = scramble(blanks, SCRAMBLE);
+      if(heur(s)===0) continue;          // shuffled back to solved — retry
+      const moves = solve(s);
+      if(moves) return { start:s, moves };
+    }
+    const s = scramble(blanks, 18);
+    return { start:s, moves: solve(s)||[] };
+  }
+
+  const CELL = 64;   // keep in sync with --cell fallback for transforms
+  function cellPx(){
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--cell');
+    const n = parseFloat(v); return isNaN(n)?CELL:n;
+  }
+
+  // speed slider -> per-move delay (ms)
+  function delayFor(val){
+    const t = val/100;                 // 0..1
+    return Math.round(700 * Math.pow(40/700, t));   // 700ms (slow) -> 40ms (fast)
+  }
+
+  class Puzzle{
+    constructor(blanks, label){
+      this.blanks=blanks; this.label=label;
+      this.token=0;
+      this.cell=cellPx();
+      this.build();
+    }
+    build(){
+      const card=document.createElement('div'); card.className='card'; this.card=card;
+      const h=document.createElement('h2'); h.textContent=this.label;
+      const m=document.createElement('div'); m.className='method'; this.methodEl=m;
+      const board=document.createElement('div'); board.className='board'; this.board=board;
+      // tile elements, one per numbered value
+      this.tiles={};
+      for(let v=1; v<=SIZE-this.blanks; v++){
+        const t=document.createElement('div'); t.className='tile'; t.textContent=v;
+        board.appendChild(t); this.tiles[v]=t;
+      }
+      const stats=document.createElement('div'); stats.className='stats';
+      stats.innerHTML =
+        '<div class="stat"><span class="v" data-moves>0</span><span class="k">Moves</span></div>'+
+        '<div class="stat"><span class="v" data-time>0.0s</span><span class="k">Time</span></div>';
+      this.movesEl=stats.querySelector('[data-moves]');
+      this.timeEl=stats.querySelector('[data-time]');
+      card.append(h,m,board,stats);
+    }
+    place(tile, index, animate){
+      const [r,c]=rc(index);
+      const px = this.cell;
+      const el=this.tiles[tile];
+      el.style.transition = animate ? '' : 'none';
+      el.style.transform = `translate(${c*px}px, ${r*px}px)`;
+      if(!animate){ // force reflow so the next animated move transitions
+        void el.offsetWidth;
+        el.style.transition='';
+      }
+    }
+    reset(){
+      this.token++;
+      this.cell=cellPx();
+      this.methodEl.textContent =
+        (algorithm==='human' ? 'human method · ' : 'optimal solver · ') + 'tiles 1–'+(SIZE-this.blanks);
+      const { start, moves } = makePuzzle(this.blanks);
+      this.moves=moves; this.start=start;
+      // render scrambled positions without animation (phantom tiles have no element)
+      for(let i=0;i<SIZE;i++){ const v=start[i]; if(v && this.tiles[v]) this.place(v, i, false); }
+      this.moveCount=0;
+      this.movesEl.textContent='0';
+      this.movesEl.classList.remove('done');
+      this.timeEl.textContent='0.0s';
+      this.timeEl.classList.remove('done');
+      this.card.classList.remove('solved');
+    }
+    async play(){
+      const my=this.token;
+      const startT=performance.now();
+      let raf;
+      const tick=()=>{ if(this.token!==my) return;
+        this.timeEl.textContent=((performance.now()-startT)/1000).toFixed(1)+'s';
+        raf=requestAnimationFrame(tick); };
+      raf=requestAnimationFrame(tick);
+
+      // live board to know each tile's current index for placement
+      const board=this.start.slice();
+      for(const mv of this.moves){
+        if(this.token!==my){ cancelAnimationFrame(raf); return; }
+        const dur=Math.min(getDelay()*0.85, 360);
+        document.documentElement.style.setProperty('--dur', dur+'ms');
+        // apply move on model
+        board[mv.to]=mv.tile; board[mv.from]=0;
+        // phantom tiles (extra blanks in human mode) have no element — count, don't draw
+        if(this.tiles[mv.tile]) this.place(mv.tile, mv.to, true);
+        this.moveCount++; this.movesEl.textContent=String(this.moveCount);
+        await sleep(getDelay(), my, this);
+        if(this.token!==my){ cancelAnimationFrame(raf); return; }
+      }
+      cancelAnimationFrame(raf);
+      this.timeEl.textContent=((performance.now()-startT)/1000).toFixed(1)+'s';
+      this.movesEl.classList.add('done');
+      this.timeEl.classList.add('done');
+      this.card.classList.add('solved');
+    }
+  }
+
+  // cancellable sleep tied to a token
+  function sleep(ms, token, pz){
+    return new Promise(res=>{ setTimeout(res, ms); });
+  }
+  let curDelay = delayFor(55);
+  function getDelay(){ return curDelay; }
+
+  // --- build the three puzzles ---
+  const grid=document.getElementById('grid');
+  const puzzles=[
+    new Puzzle(1, '1 space'),
+    new Puzzle(2, '2 spaces'),
+    new Puzzle(3, '3 spaces'),
+  ];
+  for(const p of puzzles) grid.appendChild(p.card);
+
+  function runAll(){
+    for(const p of puzzles){ p.reset(); }
+    for(const p of puzzles){ p.play(); }
+  }
+
+  document.getElementById('speed').addEventListener('input', e=>{
+    curDelay = delayFor(+e.target.value);
+  });
+  document.getElementById('algo').addEventListener('change', e=>{
+    algorithm = e.target.value;
+    runAll();
+  });
+  document.getElementById('shuffle').addEventListener('click', runAll);
+
+  runAll();   // DOM is ready (script is at end of body)
+})();
+</script>
+</body>
+</html>
