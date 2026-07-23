@@ -4,6 +4,13 @@ Three 4×4 sliding-block puzzles side by side — with **1, 2, and 3 blank space
 shuffled with the same 40 random moves and then solved automatically, with live move and
 time counters.
 
+> **Why this exists:** built alongside the article
+> [**Using AI to Call Bullshit On Yourself**](https://www.rickmanelius.com/p/using-ai-to-call-bullshit-on-yourself)
+> — on using AI to actually *test* a hunch instead of trusting it. The hunch here was that
+> more empty space would make a sliding puzzle dramatically faster to solve. It turned out
+> to be directionally right but far less dramatic than expected. The numbers below are what
+> that looks like when you check.
+
 **[▶ Live demo](https://rickmanelius.github.io/sliding-blocks-demo/)**
 
 ![Sliding blocks demo](assets/demo.gif)
